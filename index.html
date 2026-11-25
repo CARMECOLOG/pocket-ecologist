@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Карманный эколог</title>
+    
+    <!-- PWA-теги для установки на телефон и офлайн-работы -->
+    <meta name="theme-color" content="#2e7d32">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon-192.png" type="image/png">
+    
+    <!-- Локальные библиотеки (работают без интернета!) -->
+    <script src="tf.min.js"></script>
+    <script src="tm-image.min.js"></script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
+        h1 { color: #2e7d32; font-size: 24px; }
+        .upload-container { margin: 20px; }
+        #fileInput { display: none; }
+        .upload-btn { 
+            background: #4CAF50; 
+            color: white; 
+            padding: 15px 25px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            display: inline-block;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .upload-btn:hover { background: #45a049; }
+        .photo-hint {
+            display: block;
+            margin-top: 8px;
+            font-size: 13px;
+            font-weight: normal;
+            color: #e8f5e9;
+        }
+        #preview { 
+            max-width: 224px; 
+            max-height: 224px; 
+            margin: 20px auto; 
+            border: 3px solid #2e7d32;
+            border-radius: 10px;
+            display: none;
+        }
+        .label-container { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 20px; }
+        .label-box { 
+            background: white; 
+            padding: 15px; 
+            border-radius: 8px; 
+            min-width: 200px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .label-name { font-weight: bold; font-size: 16px; margin-bottom: 8px; }
+        .progress-bar { height: 25px; background: #e0e0e0; border-radius: 5px; overflow: hidden; }
+        .progress { 
+            height: 100%; 
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        #status { margin: 10px; padding: 10px; border-radius: 5px; display: inline-block; }
+        .error { background: #f8d7da; border: 1px solid #dc3545; }
+        .success { background: #d4edda; border: 1px solid #28a745; }
+        .info { background: #d1ecf1; border: 1px solid #0c5460; }
+
+        /* Стили для сообщения о пороге уверенности */
+        #result-message {
+            margin: 20px auto;
+            padding: 20px;
+            border-radius: 10px;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            display: none;
+            max-width: 600px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            line-height: 1.4;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <h1>🌿 Карманный эколог<br><span style="font-size: 16px; font-weight: normal;">(выполнила: ученица 8А класса Косыгина Анастасия)</span></h1>
+    <p>Распознавание видов растений</p>
+    
+    <div id="status" class="info">Загрузка модели...</div>
+    
+    <div class="upload-container">
+        <label for="fileInput" class="upload-btn">
+          📷 Выбрать фото
+          <span class="photo-hint">
+           (загрузите резкое фото объекта целиком при хорошем свете)
+          </span>
+        </label>
+        <input type="file" id="fileInput" accept="image/*">
+    </div>
+
+    <!-- Блок для вывода вердикта (ОК или ОПАСНОСТЬ) -->
+    <div id="result-message"></div>
+    
+    <img id="preview" alt="Предпросмотр">
+    <div id="label-container" class="label-container"></div>
+
+    <script>
+        const URL = "./";
+        let model, maxPredictions;
+        const CONFIDENCE_THRESHOLD = 80; // Порог уверенности 80%
+        
+        async function init() {
+            try {
+                const statusDiv = document.getElementById("status");
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+                
+                // Загружаем модель через официальную библиотеку Teachable Machine
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+                
+                // Создаём UI для результатов
+                const labelContainer = document.getElementById("label-container");
+                const classes = model.getClassLabels();
+                
+                for (let i = 0; i < maxPredictions; i++) {
+                    const div = document.createElement("div");
+                    div.className = "label-box";
+                    div.innerHTML = `
+                        <div class="label-name">${classes[i]}</div>
+                        <div class="progress-bar">
+                            <div class="progress" id="p${i}" style="width:0%">0%</div>
+                        </div>
+                    `;
+                    labelContainer.appendChild(div);
+                }
+                
+                statusDiv.className = "success";
+                statusDiv.innerText = "✅ Модель загружена! Выберите фото для распознавания";
+                
+            } catch (e) {
+                document.getElementById("status").className = "error";
+                document.getElementById("status").innerText = "❌ Ошибка: " + e.message;
+                console.error(e);
+            }
+        }
+        
+        // Обработка выбора файла
+        document.getElementById("fileInput").addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                document.getElementById("status").innerText = "⏳ Обработка...";
+                document.getElementById("result-message").style.display = "none"; // Скрываем старое сообщение
+                
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const preview = document.getElementById("preview");
+                    preview.src = event.target.result;
+                    preview.style.display = "block";
+                    
+                    // Ждём загрузки изображения
+                    await new Promise(resolve => {
+                        preview.onload = resolve;
+                    });
+                    
+                    // Делаем предсказание
+                    const prediction = await model.predict(preview);
+                    
+                    // 1. Находим максимальную вероятность
+                    let maxProbability = 0;
+                    let bestClassIndex = 0;
+
+                    for (let i = 0; i < maxPredictions; i++) {
+                        const percent = (prediction[i].probability * 100);
+                        const bar = document.getElementById(`p${i}`);
+                        if (bar) {
+                            bar.style.width = percent.toFixed(1) + "%";
+                            bar.innerText = percent.toFixed(1) + "%";
+                        }
+                        
+                        if (percent > maxProbability) {
+                            maxProbability = percent;
+                            bestClassIndex = i;
+                        }
+                    }
+
+                    // 2. Логика порога уверенности
+                    const resultMessage = document.getElementById("result-message");
+                    resultMessage.style.display = "block";
+
+                    if (maxProbability >= CONFIDENCE_THRESHOLD) {
+                        // ✅ ЕСЛИ УВЕРЕННОСТЬ ВЫСОКАЯ
+                        const className = prediction[bestClassIndex].className;
+                        resultMessage.className = "alert-success";
+                        resultMessage.innerHTML = `✅ ОПРЕДЕЛЕНО: <b>${className}</b><br>Уверенность: ${maxProbability.toFixed(1)}%`;
+                    } else {
+                        // ❌ ЕСЛИ УВЕРЕННОСТЬ НИЗКАЯ (< 80%)
+                        resultMessage.className = "alert-danger";
+                        resultMessage.innerHTML = `⛔ НЕ УВЕРЕН! НЕ ЕШЬ!<br>Максимальная вероятность всего ${maxProbability.toFixed(1)}%.<br>Это может быть камень, пень или нераспознанный объект.`;
+                    }
+                    
+                    document.getElementById("status").innerText = "✅ Распознавание завершено!";
+                };
+                reader.readAsDataURL(file);
+                
+            } catch (e) {
+                document.getElementById("status").className = "error";
+                document.getElementById("status").innerText = "❌ Ошибка: " + e.message;
+                console.error(e);
+            }
+        });
+        
+        // Запуск при загрузке страницы
+        window.addEventListener("load", init);
+
+        // Регистрация Service Worker для PWA (офлайн-работы на телефоне)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./service-worker.js')
+                .then(reg => console.log('Service Worker зарегистрирован'))
+                .catch(err => console.log('Service Worker не зарегистрирован:', err));
+        }
+    </script>
+</body>
+</html>
